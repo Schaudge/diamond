@@ -3,6 +3,7 @@
 #include <atomic>
 #include <vector>
 #include <queue>
+#include <condition_variable>
 
 namespace Util { namespace Parallel {
 
