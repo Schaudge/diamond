@@ -61,8 +61,8 @@ namespace ExtensionPipeline {
 		struct Target;
 		struct Pipeline : public QueryMapper
 		{
-			Pipeline(size_t query_id, Search::Hit* begin, Search::Hit* end, DpStat &dp_stat, const Search::Config &cfg, bool target_parallel) :
-				QueryMapper(query_id, begin, end, cfg, target_parallel),
+			Pipeline(size_t query_id, Search::Hit* begin, Search::Hit* end, DpStat &dp_stat, const Search::Config &cfg) :
+				QueryMapper(query_id, begin, end, cfg),
 				dp_stat(dp_stat)
 			{}
 			Target& target(size_t i);

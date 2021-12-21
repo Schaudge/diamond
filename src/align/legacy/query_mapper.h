@@ -155,7 +155,7 @@ struct Target
 
 struct QueryMapper
 {
-	QueryMapper(size_t query_id, Search::Hit* begin, Search::Hit* end, const Search::Config &metadata, bool target_parallel = false);
+	QueryMapper(size_t query_id, Search::Hit* begin, Search::Hit* end, const Search::Config &metadata);
 	void init();
 	bool generate_output(TextBuffer &buffer, Statistics &stat);
 	void rank_targets(double ratio, double factor);
@@ -187,8 +187,8 @@ struct QueryMapper
 	vector<Seed_hit> seed_hits;
 	vector<Bias_correction> query_cb;
 	TranslatedSequence translated_query;
-	bool target_parallel;
 	const Search::Config &metadata;
+	bool target_parallel;
 
 private:
 
