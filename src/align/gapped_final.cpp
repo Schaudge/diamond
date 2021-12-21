@@ -23,7 +23,7 @@ static void add_dp_targets(const Target& target, int target_idx, const Sequence*
 	}
 }
 
-vector<Match> align(vector<Target>& targets, const Sequence* query_seq, const Bias_correction* query_cb, int source_query_len, DP::Flags flags, const HspValues first_round, const Mode mode, Statistics& stat) {
+vector<Match> align(vector<Target>& targets, const Sequence* query_seq, const Bias_correction* query_cb, int source_query_len, DP::Flags flags, const HspValues first_round, const Mode mode, ThreadPool& tp, Statistics& stat) {
 	array<DP::Targets, MAX_CONTEXT> dp_targets;
 	vector<Match> r;
 	if (targets.empty())
@@ -61,7 +61,8 @@ vector<Match> align(vector<Target>& targets, const Sequence* query_seq, const Bi
 			Stats::CBS::hauser(config.comp_based_stats) ? query_cb[frame].int8.data() : nullptr,
 			flags,
 			hsp_values,
-			stat
+			stat,
+			&tp
 		};
 		list<Hsp> hsp = DP::BandedSwipe::swipe(dp_targets[frame], params);
 		while (!hsp.empty())

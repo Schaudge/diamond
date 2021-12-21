@@ -34,32 +34,46 @@ void scheduled_thread_pool_auto(size_t thread_count, size_t partition_count, _f 
 
 struct ThreadPool {
 
+	enum { PRIORITY_COUNT = 2 };
+
 	struct TaskSet {
-		TaskSet(ThreadPool& thread_pool):
-			total(0),
-			finished(0),
+		TaskSet(ThreadPool& thread_pool, int priority):
+			priority(priority),
+			total_(0),
+			finished_(0),
 			thread_pool(&thread_pool)
 		{}
 		void finish() {
-			++finished;
-			cv_.notify_one();
+			++finished_;
+			if (finished()) {
+				cv_.notify_all();
+				thread_pool->cv_.notify_all();
+			}
+		}
+		bool finished() {
+			return total_ == finished_;
 		}
 		void add() {
-			++total;
+			++total_;
 		}
 		void wait() {
 			std::unique_lock<std::mutex> lock(mtx_);
-			cv_.wait(lock, [this] {return total == finished; });
+			cv_.wait(lock, [this] {return this->finished(); });
+		}
+		void run() {
+			thread_pool->run_set(this);
 		}
 		template<class F, class... Args>
 		void enqueue(F&& f, Args&&... args) {
 			thread_pool->enqueue(*this, std::forward<F>(f), std::forward<Args>(args)...);
 		}
 	private:
-		std::atomic<int64_t> total, finished;
+		const int priority;
+		std::atomic<int64_t> total_, finished_;
 		ThreadPool* thread_pool;
 		std::mutex mtx_;
 		std::condition_variable cv_;
+		friend struct ThreadPool;
 	};
 
 	struct Task {
@@ -83,37 +97,40 @@ struct ThreadPool {
 				throw std::runtime_error("enqueue on stopped ThreadPool");
 
 			task_set.add();
-			tasks_.emplace([task]() { task(); }, task_set);
+			tasks_[task_set.priority].emplace([task]() { task(); }, task_set);
 		}
 		cv_.notify_one();
+	}
+
+	void run_set(TaskSet* task_set) {
+		for (;;)
+		{
+			Task task;
+
+			{
+				std::unique_lock<std::mutex> lock(this->mtx_);
+				this->cv_.wait(lock,
+					[this, task_set] { return this->stop_ || !queue_empty() || (task_set && task_set->finished()); });
+				if ((this->stop_ && queue_empty()) || (task_set && task_set->finished()))
+					return;
+				for(auto& q : tasks_)
+					if (!q.empty()) {
+						task = std::move(q.front());
+						q.pop();
+						break;
+					}
+			}
+
+			task.f();
+			task.task_set->finish();
+		}
 	}
 
 	ThreadPool(size_t threads) :
 		stop_(false)
 	{
 		for (size_t i = 0; i < threads; ++i)
-			workers_.emplace_back(
-				[this]
-		{
-			for (;;)
-			{
-				Task task;
-
-				{
-					std::unique_lock<std::mutex> lock(this->mtx_);
-					this->cv_.wait(lock,
-						[this] { return this->stop_ || !this->tasks_.empty(); });
-					if (this->stop_ && this->tasks_.empty())
-						return;
-					task = std::move(this->tasks_.front());
-					this->tasks_.pop();
-				}
-
-				task.f();
-				task.task_set->finish();
-			}
-		}
-		);
+			workers_.emplace_back([this] {	this->run_set(nullptr); });
 	}
 
 	~ThreadPool()
@@ -129,7 +146,14 @@ struct ThreadPool {
 
 private:
 
-	std::queue<Task> tasks_;
+	bool queue_empty() {
+		for (auto& q : tasks_)
+			if (!q.empty())
+				return false;
+		return true;
+	}
+
+	std::array<std::queue<Task>, PRIORITY_COUNT> tasks_;
 	std::vector<std::thread> workers_;
 	std::mutex mtx_;
 	std::condition_variable cv_;

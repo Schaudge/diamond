@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "../data/sequence_set.h"
 #include "../stats/cbs.h"
 #include "flags.h"
+#include "../util/parallel/thread_pool.h"
 
 struct DpTarget
 {
@@ -148,6 +149,7 @@ struct Params {
 	const Flags flags;
 	const HspValues v;
 	Statistics& stat;
+	ThreadPool* thread_pool;
 };
 
 enum { BINS = 6, SCORE_BINS = 3, ALGO_BINS = 2 };

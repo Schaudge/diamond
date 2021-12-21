@@ -108,6 +108,7 @@ TextBuffer* legacy_pipeline(AlignFetcher &hits, Search::Config& cfg, Statistics 
 
 void align_worker(int32_t query, int32_t query_end, ThreadPool::TaskSet* task_set, Search::Config* cfg)
 {
+	//std::cout << "align_worker " << query << std::endl;
 	try {
 		AlignFetcher hits;
 		hits.get(query);
@@ -189,13 +190,14 @@ void align_queries(Consumer* output_file, Search::Config& cfg)
 		size_t n_threads = config.threads_align == 0 ? config.threads_ : config.threads_align;
 		if (config.load_balancing == Config::target_parallel || (config.swipe_all && (cfg.target->seqs().size() >= cfg.query->seqs().size())))
 			n_threads = 1;
-		ThreadPool tp(n_threads);
-		ThreadPool::TaskSet task_set(tp);
+		cfg.thread_pool.reset(new ThreadPool (n_threads));
+		ThreadPool::TaskSet task_set(*cfg.thread_pool, 1);
 		task_set.enqueue(align_worker, query_range.first, query_range.second, &task_set, &cfg);
 		task_set.wait();
 		statistics.inc(Statistics::TIME_EXT, timer.microseconds());
 		
 		timer.go("Deallocating buffers");
+		cfg.thread_pool.reset();
 		delete hit_buf;
 	}
 	statistics.max(Statistics::SEARCH_TEMP_SPACE, cfg.seed_hit_buf->total_disk_size());

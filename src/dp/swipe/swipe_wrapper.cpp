@@ -180,10 +180,10 @@ static list<Hsp> dispatch_swipe(const It begin, const It end, atomic_size_t* con
 	throw std::runtime_error("Unreachable");
 }
 
-template<typename _sv, typename It>
+template<typename Sv, typename It>
 static void swipe_worker(const It begin, const It end, atomic_size_t* const next, list<Hsp> *out, vector<DpTarget> *overflow, const int round, const int bin, Params* p)
 {
-	const ptrdiff_t CHANNELS = ::DISPATCH_ARCH::ScoreTraits<_sv>::CHANNELS;
+	const ptrdiff_t CHANNELS = ::DISPATCH_ARCH::ScoreTraits<Sv>::CHANNELS;
 	Statistics stat2;
 	size_t pos;
 	vector<DpTarget> of;
@@ -197,18 +197,39 @@ static void swipe_worker(const It begin, const It end, atomic_size_t* const next
 		stat2
 	};
 	if (flag_any(p->flags, Flags::FULL_MATRIX))
-		*out = dispatch_swipe<_sv, It>(begin, end, next, of, round, bin, params);
+		*out = dispatch_swipe<Sv, It>(begin, end, next, of, round, bin, params);
 	else
 		while (begin + (pos = next->fetch_add(CHANNELS)) < end) {
 			const auto start = begin + pos;
-			out->splice(out->end(), dispatch_swipe<_sv, It>(start, start + std::min(CHANNELS, end - start), next, of, round, bin, params));
+			out->splice(out->end(), dispatch_swipe<Sv, It>(start, start + std::min(CHANNELS, end - start), next, of, round, bin, params));
 		}
 		
 	*overflow = std::move(of);
 	p->stat += stat2;
 }
 
-template<typename _sv, typename It>
+template<typename Sv, typename It>
+static void swipe_task(const It begin, const It end, atomic_size_t* const next, list<Hsp> *out, vector<DpTarget> *overflow, const int round, const int bin, Params* p) {
+	//std::cout << "swipe_task" << std::endl;
+	const ptrdiff_t CHANNELS = ::DISPATCH_ARCH::ScoreTraits<Sv>::CHANNELS;
+	Statistics stat2;
+	size_t pos;
+	vector<DpTarget> of;
+	Params params{
+		p->query,
+		p->frame,
+		p->query_source_len,
+		p->composition_bias,
+		p->flags,
+		p->v,
+		stat2
+	};
+	*out = dispatch_swipe<Sv, It>(begin, end, next, of, round, bin, params);
+	*overflow = std::move(of);
+	p->stat += stat2;
+}
+
+template<typename Sv, typename It>
 static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &overflow, const int round, const int bin, Params& p) {
 	if (begin == end)
 		return {};
@@ -221,7 +242,7 @@ static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &o
 		vector<list<Hsp>> thread_out(n);
 		vector<vector<DpTarget>> thread_overflow(n);
 		for (size_t i = 0; i < n; ++i)
-			threads.emplace_back(swipe_worker<_sv, It>, begin, end, &next, &thread_out[i], &thread_overflow[i], round, bin, &p);
+			threads.emplace_back(swipe_worker<Sv, It>, begin, end, &next, &thread_out[i], &thread_overflow[i], round, bin, &p);
 		for (auto &t : threads)
 			t.join();
 		timer.go("Banded swipe (merge)");
@@ -233,8 +254,16 @@ static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &o
 			overflow.insert(overflow.end(), v.begin(), v.end());
 		return out;
 	}
-	else
-		return dispatch_swipe<_sv, It>(begin, end, &next, overflow, round, bin, p);
+	else {
+		list<Hsp> hsp;
+		vector<DpTarget> of;
+		ThreadPool::TaskSet task_set(*p.thread_pool, 0);
+		task_set.enqueue(swipe_task<Sv, It>, begin, end, &next, &hsp, &of, round, bin, &p);
+		task_set.run();
+		overflow = std::move(of);
+		return hsp;
+	}
+	return dispatch_swipe<Sv, It>(begin, end, &next, overflow, round, bin, p);
 }
 
 template<typename It>

@@ -30,6 +30,7 @@ struct Consumer;
 struct TextInputFile;
 struct Block;
 struct TaxonomyNodes;
+struct ThreadPool;
 enum class Sensitivity;
 enum class SeedEncoding;
 enum class MaskingAlgo;
@@ -93,6 +94,8 @@ struct Config {
 	Util::Scores::CutoffTable2D cutoff_gapped1_new, cutoff_gapped2_new;
 
 	size_t                                     iteration_query_aligned;
+
+	std::unique_ptr<ThreadPool>                thread_pool;
 
 	bool iterated() const {
 		return sensitivity.size() > 1;
