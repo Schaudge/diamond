@@ -181,6 +181,10 @@ struct StringSetBase
 			return limits_ == it.limits_;
 		}
 
+		bool operator!=(const ConstIterator& it) const {
+			return limits_ != it.limits_;
+		}
+
 		ConstIterator operator+(ptrdiff_t d) const {
 			return { data_ + *(limits_ + d) - *limits_, limits_ + d };
 		}
@@ -195,8 +199,17 @@ struct StringSetBase
 			return *this;
 		}
 
+		ConstIterator& operator++() {
+			this->operator+=(1);
+			return *this;
+		}
+
 		std::pair<const T*, int64_t> operator[](const ptrdiff_t i) const {
 			return { data_ + limits_[i] - limits_[0], limits_[i + 1] - limits_[i] - _padding };
+		}
+
+		std::pair<const T*, int64_t> operator*() const {
+			return this->operator[](0);
 		}
 
 	private:

@@ -43,6 +43,7 @@ using std::thread;
 using std::array;
 using std::atomic_size_t;
 using std::mutex;
+using std::accumulate;
 
 template<bool tb, typename RC, typename C, typename IdM>
 struct SwipeConfig {
@@ -264,11 +265,20 @@ static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &o
 	list<Hsp> hsp;
 	ThreadPool::TaskSet task_set(*p.thread_pool, 0);
 	mutex mtx;
-	for (It it = begin; it < end; ) {
-		It end2 = it + std::min(CHANNELS, end - it);
-		task_set.enqueue(swipe_task<Sv, It>, it, end2, &next, &hsp, &overflow, &mtx, round, bin, &p);
-		it = end2;
+	int64_t size = 0;
+	It i0 = begin, i1 = begin;
+	while(i1 < end) {
+		const auto n = std::min(CHANNELS, end - i1);
+		size += accumulate(i1, i1 + n, 0, [](int64_t n, const DpTarget& t) {return n + t.cells(); });
+		i1 += n;
+		if (size >= config.swipe_task_size) {
+			task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);
+			i0 = i1;
+			size = 0;
+		}
 	}
+	if (i1 - i0 > 0)
+		task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);
 	task_set.run();
 	return hsp;
 }

@@ -269,6 +269,7 @@ struct Config
 	bool freq_masking;
 	Loc max_motif_len;
 	double chaining_stacked_hsp_ratio;
+	int64_t swipe_task_size;
 
 	Sensitivity sensitivity;
 

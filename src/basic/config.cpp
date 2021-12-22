@@ -536,7 +536,8 @@ Config::Config(int argc, const char **argv, bool check_io)
 		("key2", 0, "", key2)
 		("motif-mask-file", 0, "", motif_mask_file)
 		("max-motif-len", 0, "", max_motif_len, 30)
-		("chaining-stacked-hsp-ratio", 0, "", chaining_stacked_hsp_ratio, 0.5);
+		("chaining-stacked-hsp-ratio", 0, "", chaining_stacked_hsp_ratio, 0.5)
+		("swipe-task-size", 0, "", swipe_task_size, (int64_t)10000000);
 
 	parser.add(general).add(makedb).add(cluster).add(aligner).add(advanced).add(view_options).add(getseq_options).add(hidden_options).add(deprecated_options);
 	parser.store(argc, argv, command);
