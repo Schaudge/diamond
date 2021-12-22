@@ -273,12 +273,21 @@ static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &o
 		i1 += n;
 		if (size >= config.swipe_task_size) {
 			task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);
+			p.stat.inc(Statistics::SWIPE_TASKS_TOTAL);
+			p.stat.inc(Statistics::SWIPE_TASKS_ASYNC);
 			i0 = i1;
 			size = 0;
 		}
 	}
-	if (i1 - i0 > 0)
-		task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);
+	if (task_set.total() == 0) {
+		p.stat.inc(Statistics::SWIPE_TASKS_TOTAL);
+		return dispatch_swipe<Sv, It>(i0, i1, &next, overflow, round, bin, p);
+	}
+	if (i1 - i0 > 0) {
+		p.stat.inc(Statistics::SWIPE_TASKS_TOTAL);
+		p.stat.inc(Statistics::SWIPE_TASKS_ASYNC);
+		task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);		
+	}
 	task_set.run();
 	return hsp;
 }

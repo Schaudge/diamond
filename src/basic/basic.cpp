@@ -189,6 +189,8 @@ void Statistics::print() const
 	log_stream << "Extensions (8 bit)    = " << data_[EXT8] << endl;
 	log_stream << "Extensions (16 bit)   = " << data_[EXT16] << endl;
 	log_stream << "Extensions (32 bit)   = " << data_[EXT32] << endl;
+	log_stream << "SWIPE tasks           = " << data_[SWIPE_TASKS_TOTAL] << endl;
+	log_stream << "SWIPE tasks (async)   = " << data_[SWIPE_TASKS_ASYNC] << endl;
 	log_stream << "Hard queries          = " << data_[HARD_QUERIES] << endl;
 #ifdef DP_STAT
 	log_stream << "Gross DP Cells        = " << data_[GROSS_DP_CELLS] << endl;

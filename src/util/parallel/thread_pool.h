@@ -50,8 +50,11 @@ struct ThreadPool {
 				thread_pool->cv_.notify_all();
 			}
 		}
-		bool finished() {
+		bool finished() const {
 			return total_ == finished_;
+		}
+		int64_t total() const {
+			return total_;
 		}
 		void add() {
 			++total_;
@@ -61,6 +64,8 @@ struct ThreadPool {
 			cv_.wait(lock, [this] {return this->finished(); });
 		}
 		void run() {
+			if (finished())
+				return;
 			thread_pool->run_set(this);
 		}
 		template<class F, class... Args>
