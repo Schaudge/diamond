@@ -111,6 +111,9 @@ struct DpTarget
 	int matrix_scale() const {
 		return adjusted_matrix() ? config.cbs_matrix_scale : 1;
 	}
+	int64_t cells() const {
+		return int64_t(d_end - d_begin)*(int64_t)cols;
+	}
 	Sequence seq;
 	Loc d_begin, d_end, cols, true_target_len;
 	int target_idx;

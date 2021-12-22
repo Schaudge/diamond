@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <atomic>
 #include <thread>
 #include <numeric>
+#include <mutex>
 #include <limits.h>
 #include "../dp.h"
 #include "../../util/log_stream.h"
@@ -41,6 +42,7 @@ using std::atomic;
 using std::thread;
 using std::array;
 using std::atomic_size_t;
+using std::mutex;
 
 template<bool tb, typename RC, typename C, typename IdM>
 struct SwipeConfig {
@@ -209,8 +211,7 @@ static void swipe_worker(const It begin, const It end, atomic_size_t* const next
 }
 
 template<typename Sv, typename It>
-static void swipe_task(const It begin, const It end, atomic_size_t* const next, list<Hsp> *out, vector<DpTarget> *overflow, const int round, const int bin, Params* p) {
-	//std::cout << "swipe_task" << std::endl;
+static void swipe_task(const It begin, const It end, atomic_size_t* const next, list<Hsp> *out, vector<DpTarget> *overflow, mutex* mtx, const int round, const int bin, Params* p) {
 	const ptrdiff_t CHANNELS = ::DISPATCH_ARCH::ScoreTraits<Sv>::CHANNELS;
 	Statistics stat2;
 	size_t pos;
@@ -224,13 +225,18 @@ static void swipe_task(const It begin, const It end, atomic_size_t* const next, 
 		p->v,
 		stat2
 	};
-	*out = dispatch_swipe<Sv, It>(begin, end, next, of, round, bin, params);
-	*overflow = std::move(of);
+	list<Hsp> hsp = dispatch_swipe<Sv, It>(begin, end, next, of, round, bin, params);
+	{
+		std::lock_guard<mutex> lock(*mtx);
+		overflow->insert(overflow->end(), of.begin(), of.end());
+		out->splice(out->end(), hsp);
+	}
 	p->stat += stat2;
 }
 
 template<typename Sv, typename It>
 static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &overflow, const int round, const int bin, Params& p) {
+	const ptrdiff_t CHANNELS = ::DISPATCH_ARCH::ScoreTraits<Sv>::CHANNELS;
 	if (begin == end)
 		return {};
 
@@ -254,16 +260,17 @@ static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &o
 			overflow.insert(overflow.end(), v.begin(), v.end());
 		return out;
 	}
-	else {
-		list<Hsp> hsp;
-		vector<DpTarget> of;
-		ThreadPool::TaskSet task_set(*p.thread_pool, 0);
-		task_set.enqueue(swipe_task<Sv, It>, begin, end, &next, &hsp, &of, round, bin, &p);
-		task_set.run();
-		overflow = std::move(of);
-		return hsp;
+
+	list<Hsp> hsp;
+	ThreadPool::TaskSet task_set(*p.thread_pool, 0);
+	mutex mtx;
+	for (It it = begin; it < end; ) {
+		It end2 = it + std::min(CHANNELS, end - it);
+		task_set.enqueue(swipe_task<Sv, It>, it, end2, &next, &hsp, &overflow, &mtx, round, bin, &p);
+		it = end2;
 	}
-	return dispatch_swipe<Sv, It>(begin, end, &next, overflow, round, bin, p);
+	task_set.run();
+	return hsp;
 }
 
 template<typename It>
