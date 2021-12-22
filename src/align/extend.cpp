@@ -1,6 +1,6 @@
 /****
 DIAMOND protein aligner
-Copyright (C) 2020 Max Planck Society for the Advancement of Science e.V.
+Copyright (C) 2020-2021 Max Planck Society for the Advancement of Science e.V.
 
 Code developed by Benjamin Buchfink <benjamin.buchfink@tue.mpg.de>
 
@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <utility>
 #include <math.h>
 #include <mutex>
+#include <numeric>
 #include "extend.h"
 #include "../data/queries.h"
 #include "../basic/config.h"
@@ -37,6 +38,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "../search/hit.h"
 #include "load_hits.h"
 
+using std::accumulate;
 using std::vector;
 using std::list;
 using std::array;
@@ -65,7 +67,7 @@ const std::map<Sensitivity, Mode> default_ext_mode = {
 
 constexpr size_t MAX_CHUNK_SIZE = 400, MIN_CHUNK_SIZE = 128;
 
-size_t ranking_chunk_size(size_t target_count, size_t ref_letters) {
+static size_t ranking_chunk_size(size_t target_count, size_t ref_letters) {
 	if (config.no_ranking || config.global_ranking_targets > 0)
 		return target_count;
 	if (config.ext_chunk_size > 0)
@@ -77,20 +79,20 @@ size_t ranking_chunk_size(size_t target_count, size_t ref_letters) {
 	return std::max(MIN_CHUNK_SIZE, std::min(make_multiple(config.max_alignments, (size_t)32), MAX_CHUNK_SIZE)) * block_mult;
 }
 
-size_t chunk_size_multiplier(const FlatArray<SeedHit>& seed_hits, int query_len) {
+static size_t chunk_size_multiplier(const FlatArray<SeedHit>& seed_hits, int query_len) {
 	return seed_hits.size() * query_len / seed_hits.data_size() < config.seedhit_density ? config.chunk_size_multiplier : 1;
 }
 
-static size_t lazy_masking(const vector<uint32_t>& target_block_ids, Block& targets, const MaskingAlgo algo) {
+static size_t lazy_masking(vector<uint32_t>::const_iterator target_block_ids, vector<uint32_t>::const_iterator target_block_ids_end, Block& targets, const MaskingAlgo algo) {
 	if (algo == MaskingAlgo::NONE)
 		return 0;
 	vector<Letter> seq;
 	const Masking& masking = Masking::get();
 	size_t n = 0;
-	for (uint32_t t : target_block_ids)
-		if (targets.fetch_seq_if_unmasked(t, seq)) {
-			masking(seq.data(), seq.size(), algo, t);
-			targets.write_masked_seq(t, seq);
+	for (auto i = target_block_ids; i != target_block_ids_end; ++i)
+		if (targets.fetch_seq_if_unmasked(*i, seq)) {
+			masking(seq.data(), seq.size(), algo, *i);
+			targets.write_masked_seq(*i, seq);
 			++n;
 		}
 	return n;
@@ -107,35 +109,41 @@ static HspValues first_round_hspv() {
 	return first_round;
 }
 
-vector<Target> extend(size_t query_id,
+static vector<Target> extend(size_t query_id,
 	const Sequence *query_seq,
 	int source_query_len,
 	const Bias_correction *query_cb,
 	const Stats::Composition& query_comp,
-	FlatArray<SeedHit> &seed_hits,
-	vector<uint32_t> &target_block_ids,
+	FlatArray<SeedHit>::Iterator seed_hits,
+	FlatArray<SeedHit>::Iterator seed_hits_end,
+	vector<uint32_t>::const_iterator target_block_ids,
 	const Search::Config& cfg,
 	Statistics& stat,
 	DP::Flags flags,
 	const HspValues hsp_values)
 {
 	static const Loc GAPPED_FILTER_MIN_QLEN = 85;
-	stat.inc(Statistics::TARGET_HITS2, target_block_ids.size());
+	const int64_t n = seed_hits_end - seed_hits;
+	stat.inc(Statistics::TARGET_HITS2, n);
 	task_timer timer(flag_any(flags, DP::Flags::PARALLEL) ? config.target_parallel_verbosity : UINT_MAX);
 
 	if (cfg.lazy_masking && !config.global_ranking_targets)
-		stat.inc(Statistics::MASKED_LAZY, lazy_masking(target_block_ids, *cfg.target, cfg.target_masking));
+		stat.inc(Statistics::MASKED_LAZY, lazy_masking(target_block_ids, target_block_ids + n, *cfg.target, cfg.target_masking));
 
+	pair<FlatArray<SeedHit>, vector<uint32_t>> gf;
 	if (cfg.gapped_filter_evalue > 0.0 && config.global_ranking_targets == 0 && (!align_mode.query_translated || query_seq[0].length() >= GAPPED_FILTER_MIN_QLEN)) {
 		timer.go("Computing gapped filter");
-		gapped_filter(query_seq, query_cb, seed_hits, target_block_ids, stat, flags, cfg);
+		gf = gapped_filter(query_seq, query_cb, seed_hits, seed_hits_end, target_block_ids, stat, flags, cfg);
 		if (!flag_any(flags, DP::Flags::PARALLEL))
 			stat.inc(Statistics::TIME_GAPPED_FILTER, timer.microseconds());
+		seed_hits = gf.first.begin();
+		seed_hits_end = gf.first.end();
+		target_block_ids = gf.second.cbegin();
 	}
-	stat.inc(Statistics::TARGET_HITS3, target_block_ids.size());
+	stat.inc(Statistics::TARGET_HITS3, seed_hits_end - seed_hits);
 
 	timer.go("Computing chaining");
-	vector<WorkTarget> targets = ungapped_stage(query_seq, query_cb, query_comp, seed_hits, target_block_ids, flags, stat, *cfg.target, cfg.extension_mode);
+	vector<WorkTarget> targets = ungapped_stage(query_seq, query_cb, query_comp, seed_hits, seed_hits_end, target_block_ids, flags, stat, *cfg.target, cfg.extension_mode);
 	if (!flag_any(flags, DP::Flags::PARALLEL))
 		stat.inc(Statistics::TIME_CHAINING, timer.microseconds());
 
@@ -147,9 +155,7 @@ vector<Match> extend(
 	const Search::Config& cfg,
 	Statistics& stat,
 	DP::Flags flags,
-	FlatArray<SeedHit>& seed_hits,
-	vector<uint32_t>& target_block_ids,
-	const vector<TargetScore>& target_scores)
+	SeedHitList& l)
 {
 	const unsigned UNIFIED_TARGET_LEN = 50;
 	const unsigned contexts = align_mode.query_contexts;
@@ -158,7 +164,7 @@ vector<Match> extend(
 	const char* query_title = cfg.query->ids()[query_id];
 
 	if (config.log_query || (flag_any(flags, DP::Flags::PARALLEL) && !config.swipe_all))
-		log_stream << "Query=" << query_title << " Hits=" << seed_hits.data_size() << endl;
+		log_stream << "Query=" << query_title << " Hits=" << l.seed_hits.data_size() << endl;
 
 	for (unsigned i = 0; i < contexts; ++i)
 		query_seq.push_back(cfg.query->seqs()[query_id * contexts + i]);
@@ -176,15 +182,15 @@ vector<Match> extend(
 		query_comp = Stats::composition(query_seq[0]);
 
 	const int source_query_len = align_mode.query_translated ? (int)cfg.query->source_seqs()[query_id].length() : (int)cfg.query->seqs()[query_id].length();
-	const size_t target_count = target_block_ids.size();
+	const size_t target_count = l.target_block_ids.size();
 	const size_t chunk_size = ranking_chunk_size(target_count, cfg.target->seqs().letters());
-	vector<TargetScore>::const_iterator i0 = target_scores.cbegin(), i1 = i0 + std::min((ptrdiff_t)chunk_size, target_scores.cend() - i0);
+	vector<TargetScore>::const_iterator i0 = l.target_scores.cbegin(), i1 = i0 + std::min((ptrdiff_t)chunk_size, l.target_scores.cend() - i0);
 
 	if (config.toppercent == 100.0 && config.min_bit_score == 0.0)
 #ifdef EVAL_TARGET
-		while (i1 < target_scores.cend() && i1->evalue <= config.max_evalue && size_t(i1 - i0) < config.max_alignments) ++i1;
+		while (i1 < l.target_scores.cend() && i1->evalue <= config.max_evalue && size_t(i1 - i0) < config.max_alignments) ++i1;
 #else
-		while (i1 < target_scores.cend() && score_matrix.evalue(i1->score, query_len, UNIFIED_TARGET_LEN) <= config.max_evalue) i1 += 16;
+		while (i1 < l.target_scores.cend() && score_matrix.evalue(i1->score, query_len, UNIFIED_TARGET_LEN) <= config.max_evalue) i1 += 16;
 #endif
 
 	const int low_score = config.query_memory ? memory->low_score(query_id) : 0;
@@ -195,27 +201,43 @@ vector<Match> extend(
 
 	//size_t multiplier = 1;
 	int tail_score = 0;
-	thread_local FlatArray<SeedHit> seed_hits_chunk;
-	thread_local vector<uint32_t> target_block_ids_chunk;
+	FlatArray<SeedHit> seed_hits_chunk;
+	vector<uint32_t> target_block_ids_chunk;
 
 	vector<Target> aligned_targets;
-	while (i0 < target_scores.cend()) {
-		seed_hits_chunk.clear();
-		target_block_ids_chunk.clear();
+	while (i0 < l.target_scores.cend()) {
 		const size_t current_chunk_size = (size_t)(i1 - i0);
-		const bool multi_chunk = current_chunk_size < target_scores.size();
+		const bool multi_chunk = current_chunk_size < l.target_scores.size();
 		if (config.query_memory && memory->ranking_failed_count(query_id) >= chunk_size && memory->ranking_low_score(query_id) >= i0->score)
 			break;
 
-		if (multi_chunk)
+		if (multi_chunk) {
+			target_block_ids_chunk.clear();
+			seed_hits_chunk.clear();
+			target_block_ids_chunk.reserve(i1 - i0);
+			seed_hits_chunk.reserve(i1 - i0, accumulate(i0, i1, 0, [&l](int64_t n, const TargetScore& s) { return l.seed_hits.count(s.target) + n; }));
 			for (vector<TargetScore>::const_iterator j = i0; j < i1; ++j) {
-				target_block_ids_chunk.push_back(target_block_ids[j->target]);
-				seed_hits_chunk.push_back(seed_hits.begin(j->target), seed_hits.end(j->target));
+				target_block_ids_chunk.push_back(l.target_block_ids[j->target]);
+				seed_hits_chunk.push_back(l.seed_hits.begin(j->target), l.seed_hits.end(j->target));
 			}
+		}
 
 		//multiplier = std::max(multiplier, chunk_size_multiplier(seed_hits_chunk, (int)query_seq.front().length()));
 
-		vector<Target> v = extend(query_id, query_seq.data(), source_query_len, query_cb.data(), query_comp, multi_chunk ? seed_hits_chunk : seed_hits, multi_chunk ? target_block_ids_chunk : target_block_ids, cfg, stat, flags, first_round);
+		vector<Target> v = extend(
+			query_id,
+			query_seq.data(),
+			source_query_len,
+			query_cb.data(),
+			query_comp,
+			multi_chunk ? seed_hits_chunk.begin() : l.seed_hits.begin(),
+			multi_chunk ? seed_hits_chunk.end() : l.seed_hits.end(),
+			multi_chunk ? target_block_ids_chunk.cbegin() : l.target_block_ids.cbegin(),
+			cfg,
+			stat,
+			flags,
+			first_round);
+
 		const size_t n = v.size();
 		stat.inc(Statistics::TARGET_HITS4, v.size());
 		bool new_hits = false;
@@ -235,7 +257,7 @@ vector<Match> extend(
 			tail_score = (i1 - 1)->score;
 
 		i0 = i1;
-		i1 = std::min(i1 + std::min(chunk_size, MAX_CHUNK_SIZE), target_scores.cend());
+		i1 = std::min(i1 + std::min(chunk_size, MAX_CHUNK_SIZE), l.target_scores.cend());
 	}
 
 	if (config.swipe_all)
@@ -259,26 +281,23 @@ vector<Match> extend(
 vector<Match> extend(size_t query_id, Search::Hit* begin, Search::Hit* end, const Search::Config &cfg, Statistics &stat, DP::Flags flags) {
 	task_timer timer(flag_any(flags, DP::Flags::PARALLEL) ? config.target_parallel_verbosity : UINT_MAX);
 	timer.go("Loading seed hits");
-	thread_local FlatArray<SeedHit> seed_hits;
-	thread_local vector<uint32_t> target_block_ids;
-	thread_local vector<TargetScore> target_scores;
-	load_hits(begin, end, seed_hits, target_block_ids, target_scores, cfg.target->seqs());
-	stat.inc(Statistics::TARGET_HITS0, target_block_ids.size());
+	SeedHitList l = load_hits(begin, end, cfg.target->seqs());
+	stat.inc(Statistics::TARGET_HITS0, l.target_block_ids.size());
 	stat.inc(Statistics::TIME_LOAD_HIT_TARGETS, timer.microseconds());
 	timer.finish();
-	const size_t target_count = target_block_ids.size();	
+	const size_t target_count = l.target_block_ids.size();	
 	const size_t chunk_size = ranking_chunk_size(target_count, cfg.target->seqs().letters());
 
 	if (chunk_size < target_count || config.global_ranking_targets > 0) {
 		timer.go("Sorting targets by score");
-		std::sort(target_scores.begin(), target_scores.end());
+		std::sort(l.target_scores.begin(), l.target_scores.end());
 		stat.inc(Statistics::TIME_SORT_TARGETS_BY_SCORE, timer.microseconds());
 		timer.finish();
 		if (config.global_ranking_targets > 0)
-			return GlobalRanking::ranking_list(query_id, target_scores.begin(), target_scores.end(), target_block_ids.begin(), seed_hits, cfg);
+			return GlobalRanking::ranking_list(query_id, l.target_scores.begin(), l.target_scores.end(), l.target_block_ids.begin(), l.seed_hits, cfg);
 	}
 
-	return extend(query_id, cfg, stat, flags, seed_hits, target_block_ids, target_scores);
+	return extend(query_id, cfg, stat, flags, l);
 }
 
 }

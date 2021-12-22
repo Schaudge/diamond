@@ -1,6 +1,6 @@
 /****
 DIAMOND protein aligner
-Copyright (C) 2020 Max Planck Society for the Advancement of Science e.V.
+Copyright (C) 2020-2021 Max Planck Society for the Advancement of Science e.V.
 
 Code developed by Benjamin Buchfink <benjamin.buchfink@tue.mpg.de>
 
@@ -25,14 +25,31 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 namespace Extension {
 
 template<typename It>
-void load_hits(It begin, It end, FlatArray<SeedHit> &hits, vector<uint32_t> &target_block_ids, vector<TargetScore> &target_scores, const SequenceSet& ref_seqs) {
-	hits.clear();
-	hits.reserve(end - begin);
-	target_block_ids.clear();
-	target_scores.clear();
-	if (begin >= end)
-		return;
-	std::sort(begin, end, Search::Hit::CmpSubject());
+static const int64_t count_targets(It begin, It end) {
+	if (begin == end)
+		return 0;
+	auto last = (begin++)->subject_;
+	int64_t n = 1;
+	for (It i = begin; i < end; ++i)
+		if (i->subject_ != last) {
+			last = i->subject_;
+			++n;
+		}
+	return n;
+}
+
+template<typename It>
+static SeedHitList load_hits(It begin, It end, const SequenceSet& ref_seqs) {
+	std::sort(begin, end, Search::Hit::CmpSubject());	
+	const auto targets = count_targets(begin, end), hits = end - begin;
+	SeedHitList list;
+	list.seed_hits.reserve(targets, hits);
+	list.target_block_ids.reserve(targets);
+	list.target_scores.reserve(targets);
+
+	if (hits <= 0)
+		return list;
+	
 	const size_t total_subjects = ref_seqs.size();
 	unsigned target_len;
 	uint32_t target = UINT32_MAX;
@@ -40,7 +57,7 @@ void load_hits(It begin, It end, FlatArray<SeedHit> &hits, vector<uint32_t> &tar
 #ifdef HIT_KEEP_TARGET_ID
 	if(true) {
 #else
-	if (std::log2(total_subjects) * (end - begin) < total_subjects / 10) {
+	if (std::log2(total_subjects) * hits < total_subjects / 10) {
 #endif
 		for (auto i = begin; i < end; ++i) {
 #ifdef HIT_KEEP_TARGET_ID
@@ -52,18 +69,18 @@ void load_hits(It begin, It end, FlatArray<SeedHit> &hits, vector<uint32_t> &tar
 			if (t != target) {
 				if (target != UINT32_MAX) {
 #ifdef EVAL_TARGET
-					target_scores.push_back({ uint32_t(target_block_ids.size() - 1), score, score_matrix.evalue(score, query_len, target_len) });
+					list.target_scores.push_back({ uint32_t(list.target_block_ids.size() - 1), score, score_matrix.evalue(score, query_len, target_len) });
 #else
-					target_scores.push_back({ uint32_t(target_block_ids.size() - 1), score });
+					list.target_scores.push_back({ uint32_t(list.target_block_ids.size() - 1), score });
 #endif
 					score = 0;
 				}
-				hits.next();
+				list.seed_hits.next();
 				target = t;
 				target_len = (unsigned)ref_seqs[target].length();
-				target_block_ids.push_back(target);
+				list.target_block_ids.push_back(target);
 			}
-			hits.push_back({ (int)i->seed_offset_, (int)l.second, i->score_, i->query_ % align_mode.query_contexts });
+			list.seed_hits.push_back({ (int)i->seed_offset_, (int)l.second, i->score_, i->query_ % align_mode.query_contexts });
 			score = std::max(score, i->score_);
 		}
 	}
@@ -76,27 +93,29 @@ void load_hits(It begin, It end, FlatArray<SeedHit> &hits, vector<uint32_t> &tar
 			if (t != target) {
 				if (target != UINT32_MAX) {
 #ifdef EVAL_TARGET
-					target_scores.push_back({ uint32_t(target_block_ids.size() - 1), score, score_matrix.evalue(score, query_len, target_len) });
+					list.target_scores.push_back({ uint32_t(list.target_block_ids.size() - 1), score, score_matrix.evalue(score, query_len, target_len) });
 #else
-					target_scores.push_back({ uint32_t(target_block_ids.size() - 1), score });
+					list.target_scores.push_back({ uint32_t(list.target_block_ids.size() - 1), score });
 #endif
 					score = 0;
 				}
-				hits.next();
-				target_block_ids.push_back(t);
+				list.seed_hits.next();
+				list.target_block_ids.push_back(t);
 				target = t;
 				target_len = (unsigned)ref_seqs[target].length();
 			}
-			hits.push_back({ (int)i->seed_offset_, (int)(subject_offset - *(it - 1)), i->score_, i->query_ % align_mode.query_contexts });
+			list.seed_hits.push_back({ (int)i->seed_offset_, (int)(subject_offset - *(it - 1)), i->score_, i->query_ % align_mode.query_contexts });
 			score = std::max(score, i->score_);
 		}
 	}
 	if (target != UINT32_MAX)
 #ifdef EVAL_TARGET
-		target_scores.push_back({ uint32_t(target_block_ids.size() - 1), score, score_matrix.evalue(score, query_len, target_len) });
+		list.target_scores.push_back({ uint32_t(list.target_block_ids.size() - 1), score, score_matrix.evalue(score, query_len, target_len) });
 #else
-		target_scores.push_back({ uint32_t(target_block_ids.size() - 1), score });
+		list.target_scores.push_back({ uint32_t(list.target_block_ids.size() - 1), score });
 #endif
+
+	return list;
 }
 
 }

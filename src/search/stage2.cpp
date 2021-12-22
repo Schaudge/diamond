@@ -63,8 +63,8 @@ static int ungapped_window(int query_len) {
 
 static void search_query_offset(const SeedLoc& q,
 	const SeedLoc* s,
-	FlatArray<uint32_t>::ConstIterator hits,
-	FlatArray<uint32_t>::ConstIterator hits_end,
+	FlatArray<uint32_t>::DataConstIterator hits,
+	FlatArray<uint32_t>::DataConstIterator hits_end,
 	WorkSet& work_set)
 {
 	constexpr auto N = vector<Stage1_hit>::const_iterator::difference_type(::DISPATCH_ARCH::SIMD::Vector<int8_t>::CHANNELS);
@@ -96,7 +96,7 @@ static void search_query_offset(const SeedLoc& q,
 
 	const int interval_mod = config.left_most_interval > 0 ? seed_offset % config.left_most_interval : window_left, interval_overhang = std::max(window_left - interval_mod, 0);
 
-	for (FlatArray<uint32_t>::ConstIterator i = hits; i < hits_end; i += n) {
+	for (FlatArray<uint32_t>::DataConstIterator i = hits; i < hits_end; i += n) {
 
 		n = std::min(N, hits_end - i);
 		for (size_t j = 0; j < n; ++j)
@@ -150,7 +150,7 @@ static void FLATTEN search_tile(
 	const uint32_t query_count = (uint32_t)hits.size();
 	const SeedLoc* q_begin = q + query_begin, *s_begin = s + subject_begin;
 	for (uint32_t i = 0; i < query_count; ++i) {
-		FlatArray<uint32_t>::ConstIterator r1 = hits.begin(i), r2 = hits.end(i);
+		FlatArray<uint32_t>::DataConstIterator r1 = hits.begin(i), r2 = hits.end(i);
 		if (r2 == r1)
 			continue;
 		search_query_offset(q_begin[i], s_begin, r1, r2, work_set);

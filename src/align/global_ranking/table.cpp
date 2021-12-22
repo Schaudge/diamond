@@ -83,7 +83,7 @@ static void get_query_hits(SeedHits::Iterator begin, SeedHits::Iterator end, vec
 #endif
 }
 
-static pair<int, unsigned> target_score(const FlatArray<Extension::SeedHit>::Iterator begin, const FlatArray<Extension::SeedHit>::Iterator end, const Sequence* query_seq, const Sequence& target_seq) {
+static pair<int, unsigned> target_score(const FlatArray<Extension::SeedHit>::DataIterator begin, const FlatArray<Extension::SeedHit>::DataIterator end, const Sequence* query_seq, const Sequence& target_seq) {
 	if (config.no_reextend) {
 		int score = begin->score;
 		unsigned context = begin->frame;
@@ -119,13 +119,10 @@ static void get_query_hits_reextend(size_t source_query_block_id, SeedHits::Iter
 	const SequenceSet& target_seqs = cfg.target->seqs();
 
 	hits.clear();
-	FlatArray<Extension::SeedHit> seed_hits;
-	vector<uint32_t> target_block_ids;
-	vector<Extension::TargetScore> scores;
-	Extension::load_hits(begin, end, seed_hits, target_block_ids, scores, cfg.target->seqs());
-	for (size_t i = 0; i < target_block_ids.size(); ++i) {
-		const auto score = target_score(seed_hits.begin(i), seed_hits.end(i), query_seq.data(), target_seqs[target_block_ids[i]]);
-		hits.emplace_back((uint32_t)cfg.target->block_id2oid(target_block_ids[i]), score.first, score.second);
+	Extension::SeedHitList l = Extension::load_hits(begin, end, cfg.target->seqs());
+	for (size_t i = 0; i < l.target_block_ids.size(); ++i) {
+		const auto score = target_score(l.seed_hits.begin(i), l.seed_hits.end(i), query_seq.data(), target_seqs[l.target_block_ids[i]]);
+		hits.emplace_back((uint32_t)cfg.target->block_id2oid(l.target_block_ids[i]), score.first, score.second);
 	}
 }
 

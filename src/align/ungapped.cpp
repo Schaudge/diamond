@@ -82,7 +82,7 @@ WorkTarget::WorkTarget(size_t block_id, const Sequence& seq, int query_len, cons
 		matrix = Stats::TargetMatrix(query_comp, query_len, seq);
 }
 
-WorkTarget ungapped_stage(FlatArray<SeedHit>::Iterator begin, FlatArray<SeedHit>::Iterator end, const Sequence *query_seq, const Bias_correction *query_cb, const Stats::Composition& query_comp, const int16_t** query_matrix, uint32_t block_id, Statistics& stat, const Block& targets, const Mode mode) {
+WorkTarget ungapped_stage(FlatArray<SeedHit>::DataIterator begin, FlatArray<SeedHit>::DataIterator end, const Sequence *query_seq, const Bias_correction *query_cb, const Stats::Composition& query_comp, const int16_t** query_matrix, uint32_t block_id, Statistics& stat, const Block& targets, const Mode mode) {
 	array<vector<Diagonal_segment>, MAX_CONTEXT> diagonal_segments;
 	task_timer timer;
 	const SequenceSet& ref_seqs = targets.seqs(), &ref_seqs_unmasked = targets.unmasked_seqs();
@@ -93,7 +93,7 @@ WorkTarget ungapped_stage(FlatArray<SeedHit>::Iterator begin, FlatArray<SeedHit>
 		stat.inc(Statistics::MATRIX_ADJUST_COUNT);
 
 	if (mode == Mode::FULL) {
-		for (FlatArray<SeedHit>::Iterator hit = begin; hit < end; ++hit)
+		for (FlatArray<SeedHit>::DataIterator hit = begin; hit < end; ++hit)
 			target.ungapped_score[hit->frame] = std::max(target.ungapped_score[hit->frame], hit->score);
 		return target;
 	}
@@ -103,7 +103,7 @@ WorkTarget ungapped_stage(FlatArray<SeedHit>::Iterator begin, FlatArray<SeedHit>
 		return target;
 	}
 	std::sort(begin, end);
-	for (FlatArray<SeedHit>::Iterator hit = begin; hit < end; ++hit) {
+	for (FlatArray<SeedHit>::DataIterator hit = begin; hit < end; ++hit) {
 		target.ungapped_score[hit->frame] = std::max(target.ungapped_score[hit->frame], hit->score);
 		if (!diagonal_segments[hit->frame].empty() && diagonal_segments[hit->frame].back().diag() == hit->diag() && diagonal_segments[hit->frame].back().subject_end() >= hit->j)
 			continue;
@@ -123,10 +123,10 @@ WorkTarget ungapped_stage(FlatArray<SeedHit>::Iterator begin, FlatArray<SeedHit>
 	return target;
 }
 
-void ungapped_stage_worker(size_t i, size_t thread_id, const Sequence *query_seq, const Bias_correction *query_cb, const Stats::Composition* query_comp, FlatArray<SeedHit> *seed_hits, const uint32_t* target_block_ids, vector<WorkTarget> *out, mutex *mtx, Statistics* stat, const Block* targets, const Mode mode) {
+void ungapped_stage_worker(size_t i, size_t thread_id, const Sequence *query_seq, const Bias_correction *query_cb, const Stats::Composition* query_comp, FlatArray<SeedHit>::Iterator seed_hits, vector<uint32_t>::const_iterator target_block_ids, vector<WorkTarget> *out, mutex *mtx, Statistics* stat, const Block* targets, const Mode mode) {
 	Statistics stats;
 	const int16_t* query_matrix = nullptr;
-	WorkTarget target = ungapped_stage(seed_hits->begin(i), seed_hits->end(i), query_seq, query_cb, *query_comp, &query_matrix, target_block_ids[i], stats, *targets, mode);
+	WorkTarget target = ungapped_stage(seed_hits.begin(i), seed_hits.end(i), query_seq, query_cb, *query_comp, &query_matrix, target_block_ids[i], stats, *targets, mode);
 	{
 		std::lock_guard<mutex> guard(*mtx);
 		out->push_back(std::move(target));
@@ -135,18 +135,19 @@ void ungapped_stage_worker(size_t i, size_t thread_id, const Sequence *query_seq
 	delete[] query_matrix;
 }
 
-vector<WorkTarget> ungapped_stage(const Sequence *query_seq, const Bias_correction *query_cb, const Stats::Composition& query_comp, FlatArray<SeedHit> &seed_hits, const vector<uint32_t>& target_block_ids, DP::Flags flags, Statistics& stat, const Block& target_block, const Mode mode) {
+vector<WorkTarget> ungapped_stage(const Sequence *query_seq, const Bias_correction *query_cb, const Stats::Composition& query_comp, FlatArray<SeedHit>::Iterator seed_hits, FlatArray<SeedHit>::Iterator seed_hits_end, vector<uint32_t>::const_iterator target_block_ids, DP::Flags flags, Statistics& stat, const Block& target_block, const Mode mode) {
 	vector<WorkTarget> targets;
-	if (target_block_ids.size() == 0)
+	const int64_t n = seed_hits_end - seed_hits;
+	if(n == 0)
 		return targets;
-	targets.reserve(target_block_ids.size());
+	targets.reserve(n);
 	const int16_t* query_matrix = nullptr;
 	if (flag_any(flags, DP::Flags::PARALLEL)) {
 		mutex mtx;
-		Util::Parallel::scheduled_thread_pool_auto(config.threads_, seed_hits.size(), ungapped_stage_worker, query_seq, query_cb, &query_comp, &seed_hits, target_block_ids.data(), &targets, &mtx, &stat, &target_block, mode);
+		Util::Parallel::scheduled_thread_pool_auto(config.threads_, n, ungapped_stage_worker, query_seq, query_cb, &query_comp, seed_hits, target_block_ids, &targets, &mtx, &stat, &target_block, mode);
 	}
 	else {
-		for (size_t i = 0; i < target_block_ids.size(); ++i)
+		for (int64_t i = 0; i < n; ++i)
 			targets.push_back(ungapped_stage(seed_hits.begin(i), seed_hits.end(i), query_seq, query_cb, query_comp, &query_matrix, target_block_ids[i], stat, target_block, mode));
 	}
 

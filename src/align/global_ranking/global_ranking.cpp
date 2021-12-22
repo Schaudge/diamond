@@ -30,7 +30,7 @@ using std::vector;
 
 namespace Extension { namespace GlobalRanking {
 
-uint16_t recompute_overflow_scores(FlatArray<SeedHit>::ConstIterator begin, FlatArray<SeedHit>::ConstIterator end, size_t query_id, uint32_t target_id, const Search::Config& cfg) {
+uint16_t recompute_overflow_scores(FlatArray<SeedHit>::DataConstIterator begin, FlatArray<SeedHit>::DataConstIterator end, size_t query_id, uint32_t target_id, const Search::Config& cfg) {
 	const auto query = cfg.query->seqs()[query_id];
 	const auto target = cfg.target->seqs()[target_id];
 	int score = 0;

@@ -41,21 +41,16 @@ namespace Extension { namespace GlobalRanking {
 typedef unordered_map<uint32_t, uint32_t> TargetMap;
 
 void extend_query(const QueryList& query_list, const TargetMap& db2block_id, const Search::Config& cfg, Statistics& stats) {
-	thread_local vector<uint32_t> target_block_ids;
-	thread_local vector<TargetScore> target_scores;
-	thread_local FlatArray<SeedHit> seed_hits;
+	SeedHitList l;
 	const size_t n = query_list.targets.size();
-	target_block_ids.clear();
-	target_block_ids.reserve(n);
-	target_scores.clear();
-	target_scores.reserve(n);
-	seed_hits.clear();
-	seed_hits.reserve(n);
+	l.target_block_ids.reserve(n);
+	l.target_scores.reserve(n);
+	l.seed_hits.reserve(n, 0);
 	for (size_t i = 0; i < n; ++i) {
-		target_block_ids.push_back(db2block_id.at(query_list.targets[i].database_id));
-		target_scores.push_back({ (uint32_t)i, query_list.targets[i].score });
-		seed_hits.next();
-		seed_hits.push_back({ 0,0,query_list.targets[i].score,0 });
+		l.target_block_ids.push_back(db2block_id.at(query_list.targets[i].database_id));
+		l.target_scores.push_back({ (uint32_t)i, query_list.targets[i].score });
+		l.seed_hits.next();
+		l.seed_hits.push_back({ 0,0,query_list.targets[i].score,0 });
 	}
 	
 	DP::Flags flags = DP::Flags::FULL_MATRIX;
@@ -65,9 +60,7 @@ void extend_query(const QueryList& query_list, const TargetMap& db2block_id, con
 		cfg,
 		stats,
 		flags,
-		seed_hits,
-		target_block_ids,
-		target_scores);
+		l);
 
 	TextBuffer* buf = Extension::generate_output(matches, query_list.query_block_id, stats, cfg);
 	if (!matches.empty() && (!config.unaligned.empty() || !config.aligned_file.empty())) {
@@ -133,25 +126,20 @@ void extend(SequenceFile& db, TempFile& merged_query_list, BitVector& ranking_db
 
 void extend_query(size_t source_query_block_id, const TargetMap& db2block_id, Search::Config& cfg, Statistics& stats) {
 	const size_t N = config.global_ranking_targets;
-	thread_local vector<uint32_t> target_block_ids;
-	thread_local vector<TargetScore> target_scores;
-	thread_local FlatArray<SeedHit> seed_hits;
+	SeedHitList l;
 	vector<Hit>::const_iterator table_begin = cfg.ranking_table->cbegin() + source_query_block_id * N, table_end = table_begin + N;
 	while (table_end > table_begin && (table_end - 1)->score == 0) --table_end;
 	const size_t n = table_end - table_begin;
 	TextBuffer* buf = nullptr;
 	if (n) {
-		target_block_ids.clear();
-		target_block_ids.reserve(n);
-		target_scores.clear();
-		target_scores.reserve(n);
-		seed_hits.clear();
-		seed_hits.reserve(n);
+		l.target_block_ids.reserve(n);
+		l.target_scores.reserve(n);
+		l.seed_hits.reserve(n, 0);
 		for (size_t i = 0; i < n; ++i) {
-			target_block_ids.push_back(db2block_id.at(table_begin[i].oid));
-			target_scores.push_back({ (uint32_t)i, table_begin[i].score });
-			seed_hits.next();
-			seed_hits.push_back({ 0,0,table_begin[i].score, table_begin[i].context });
+			l.target_block_ids.push_back(db2block_id.at(table_begin[i].oid));
+			l.target_scores.push_back({ (uint32_t)i, table_begin[i].score });
+			l.seed_hits.next();
+			l.seed_hits.push_back({ 0,0,table_begin[i].score, table_begin[i].context });
 		}
 
 		DP::Flags flags = DP::Flags::FULL_MATRIX;
@@ -161,9 +149,7 @@ void extend_query(size_t source_query_block_id, const TargetMap& db2block_id, Se
 			cfg,
 			stats,
 			flags,
-			seed_hits,
-			target_block_ids,
-			target_scores);
+			l);
 
 		buf = cfg.iterated() ? Extension::generate_intermediate_output(matches, source_query_block_id, cfg) : Extension::generate_output(matches, source_query_block_id, stats, cfg);
 

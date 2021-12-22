@@ -1,6 +1,6 @@
 /****
 DIAMOND protein aligner
-Copyright (C) 2020 Max Planck Society for the Advancement of Science e.V.
+Copyright (C) 2020-2021 Max Planck Society for the Advancement of Science e.V.
 
 Code developed by Benjamin Buchfink <benjamin.buchfink@tue.mpg.de>
 
@@ -21,22 +21,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 #include <vector>
 
-template<typename _t>
+template<typename T>
 struct FlatArray {
 
-	typedef typename std::vector<_t>::iterator Iterator;
-	typedef typename std::vector<_t>::const_iterator ConstIterator;
+	typedef typename std::vector<T>::iterator DataIterator;
+	typedef typename std::vector<T>::const_iterator DataConstIterator;
 
 	FlatArray() {
 		limits_.push_back(0);
 	}
 
-	void push_back(const _t &x) {
+	void push_back(const T &x) {
 		data_.push_back(x);
 		++limits_.back();
 	}
 
-	void push_back(ConstIterator begin, ConstIterator end) {
+	void push_back(DataConstIterator begin, DataConstIterator end) {
 		data_.insert(data_.end(), begin, end);
 		limits_.push_back(limits_.back() + (end - begin));
 	}
@@ -55,10 +55,6 @@ struct FlatArray {
 		limits_.push_back(0);
 	}
 
-	void reserve(size_t n) {
-		data_.reserve(n);
-	}
-
 	size_t size() const {
 		return limits_.size() - 1;
 	}
@@ -67,37 +63,97 @@ struct FlatArray {
 		return data_.size();
 	}
 
-	ConstIterator begin(size_t i) const {
+	DataConstIterator begin(size_t i) const {
 		return data_.cbegin() + limits_[i];
 	}
 
-	ConstIterator end(size_t i) const {
+	DataConstIterator end(size_t i) const {
 		return data_.cbegin() + limits_[i + 1];
 	}
 
-	ConstIterator cbegin(size_t i) const {
+	DataConstIterator cbegin(size_t i) const {
 		return data_.cbegin() + limits_[i];
 	}
 
-	ConstIterator cend(size_t i) const {
+	DataConstIterator cend(size_t i) const {
 		return data_.cbegin() + limits_[i + 1];
 	}
 
-	Iterator begin(size_t i) {
+	DataIterator begin(size_t i) {
 		return data_.begin() + limits_[i];
 	}
 
-	Iterator end(size_t i) {
+	DataIterator end(size_t i) {
 		return data_.begin() + limits_[i + 1];
 	}
 
-	size_t count(size_t i) const {
+	int64_t count(size_t i) const {
 		return limits_[i + 1] - limits_[i];
+	}
+
+	struct ConstIterator {
+		ConstIterator(typename std::vector<size_t>::const_iterator limits, typename std::vector<T>::const_iterator data_begin):
+			limits_(limits),
+			data_begin_(data_begin)
+		{}
+		DataConstIterator begin(size_t i) const {
+			return data_begin_ + limits_[i];
+		}
+		DataConstIterator end(size_t i) const {
+			return data_begin_ + limits_[i + 1];
+		}
+		int64_t operator-(const ConstIterator& i) const {
+			return limits_ - i.limits_;
+		}
+	private:
+		typename std::vector<size_t>::const_iterator limits_;
+		typename std::vector<T>::const_iterator data_begin_;
+	};
+
+	ConstIterator cbegin() const {
+		return ConstIterator(limits_.cbegin(), data_.cbegin());
+	}
+
+	ConstIterator cend() const {
+		return ConstIterator(limits_.cend() - 1, data_.cbegin());
+	}
+
+	struct Iterator {
+		Iterator() {}
+		Iterator(typename std::vector<size_t>::const_iterator limits, typename std::vector<T>::iterator data_begin) :
+			limits_(limits),
+			data_begin_(data_begin)
+		{}
+		DataIterator begin(size_t i) const {
+			return data_begin_ + limits_[i];
+		}
+		DataIterator end(size_t i) const {
+			return data_begin_ + limits_[i + 1];
+		}
+		int64_t operator-(const Iterator& i) const {
+			return limits_ - i.limits_;
+		}
+	private:
+		typename std::vector<size_t>::const_iterator limits_;
+		typename std::vector<T>::iterator data_begin_;
+	};
+
+	Iterator begin() {
+		return Iterator(limits_.cbegin(), data_.begin());
+	}
+
+	Iterator end() {
+		return Iterator(limits_.cend() - 1, data_.begin());
+	}
+
+	void reserve(const int64_t size, const int64_t data_size) {
+		data_.reserve(data_size);
+		limits_.reserve(size + 1);
 	}
 
 private:
 
-	std::vector<_t> data_;
+	std::vector<T> data_;
 	std::vector<size_t> limits_;
 
 };
