@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "output.h"
 #include "../data/queries.h"
 #include "../util/util.h"
+#include "../util/parallel/thread_pool.h"
 
 using std::chrono::high_resolution_clock;
 using std::chrono::seconds;
@@ -87,7 +88,8 @@ void heartbeat_worker(size_t qend, const Search::Config* cfg)
 				<< " size=" << megabytes(OutputSink::get().size())
 				<< " max_size=" << megabytes(OutputSink::get().max_size())
 				<< " next=" << title.substr(0, title.find(' '))
-				<< " ETA=" << (double)duration_cast<seconds>(high_resolution_clock::now() - t0).count() / (next - OutputSink::get().begin()) * (qend - next) << "s"
+				<< " queue=" << cfg->thread_pool->queue_len(0) << "/" << cfg->thread_pool->queue_len(1)
+				//<< " ETA=" << (double)duration_cast<seconds>(high_resolution_clock::now() - t0).count() / (next - OutputSink::get().begin()) * (qend - next) << "s"
 				<< endl;
 			n = 0;
 		}

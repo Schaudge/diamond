@@ -4,6 +4,7 @@
 #include <vector>
 #include <queue>
 #include <condition_variable>
+#include <numeric>
 
 namespace Util { namespace Parallel {
 
@@ -147,6 +148,10 @@ struct ThreadPool {
 		cv_.notify_all();
 		for (std::thread &worker : workers_)
 			worker.join();
+	}
+
+	int64_t queue_len(int priority) const {
+		return tasks_[priority].size();
 	}
 
 private:

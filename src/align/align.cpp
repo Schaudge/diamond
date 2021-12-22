@@ -40,6 +40,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 using std::get;
 using std::tuple;
 using std::unique_ptr;
+using std::thread;
 
 DpStat dp_stat;
 
@@ -185,8 +186,9 @@ void align_queries(Consumer* output_file, Search::Config& cfg)
 		timer.go("Computing alignments");
 		AlignFetcher::init(query_range.first, query_range.second, hit_buf->data(), hit_buf->data() + hit_buf->size());
 		OutputSink::instance = unique_ptr<OutputSink>(new OutputSink(query_range.first, output_file));
-		/*if (config.verbosity >= 3 && config.load_balancing == Config::query_parallel && !config.no_heartbeat && !config.swipe_all)
-			threads.emplace_back(heartbeat_worker, query_range.second, &cfg);*/
+		unique_ptr<thread> heartbeat;
+		if (config.verbosity >= 3 && config.load_balancing == Config::query_parallel && !config.no_heartbeat && !config.swipe_all)
+			heartbeat.reset(new thread(heartbeat_worker, query_range.second, &cfg));
 		size_t n_threads = config.threads_align == 0 ? config.threads_ : config.threads_align;
 		if (config.load_balancing == Config::target_parallel || (config.swipe_all && (cfg.target->seqs().size() >= cfg.query->seqs().size())))
 			n_threads = 1;
@@ -194,6 +196,8 @@ void align_queries(Consumer* output_file, Search::Config& cfg)
 		ThreadPool::TaskSet task_set(*cfg.thread_pool, 1);
 		task_set.enqueue(align_worker, query_range.first, query_range.second, &task_set, &cfg);
 		task_set.wait();
+		if (heartbeat)
+			heartbeat->join();
 		statistics.inc(Statistics::TIME_EXT, timer.microseconds());
 		
 		timer.go("Deallocating buffers");
