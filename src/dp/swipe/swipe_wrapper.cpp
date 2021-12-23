@@ -286,7 +286,7 @@ static list<Hsp> swipe_threads(const It begin, const It end, vector<DpTarget> &o
 	if (i1 - i0 > 0) {
 		p.stat.inc(Statistics::SWIPE_TASKS_TOTAL);
 		p.stat.inc(Statistics::SWIPE_TASKS_ASYNC);
-		task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);		
+		task_set.enqueue(swipe_task<Sv, It>, i0, i1, &next, &hsp, &overflow, &mtx, round, bin, &p);
 	}
 	task_set.run();
 	return hsp;
@@ -374,7 +374,8 @@ static list<Hsp> recompute_reversed(list<Hsp> &hsps, Params& p) {
 		cbs,
 		p.flags,
 		p.v,
-		p.stat
+		p.stat,
+		p.thread_pool
 	};
 	for (unsigned bin = SCORE_BINS; bin < BINS; ++bin) {
 		auto r = swipe_bin(bin, dp_targets[bin].begin(), dp_targets[bin].end(), 1, params);
